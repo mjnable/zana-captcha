@@ -7,6 +7,7 @@ namespace Zana\Captcha\Provider;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
+use Zana\Security\Bot\BotClaimsInterface;
 use Zana\Security\Bot\BotVerdict;
 use Zana\Security\Bot\BotVerifierInterface;
 
@@ -18,10 +19,11 @@ use Zana\Security\Bot\BotVerifierInterface;
  * action and the hostname.
  *
  * The answer is unavailable, not a bot, when the provider cannot be asked
- * or its answer cannot be read, and when it says the secret is missing or
- * wrong: that is the application's mistake, not the visitor's.
+ * or its answer cannot be read; misconfigured, always refused, when no HTTP
+ * client is registered or the provider says the secret is missing or wrong
+ * (2.25.1): that is the application's mistake, not the visitor's.
  */
-abstract class SiteVerify implements BotVerifierInterface
+abstract class SiteVerify implements BotVerifierInterface, BotClaimsInterface
 {
     /** Codes that mean the application, not the visitor, is wrong. */
     private const array OWN_MISTAKES = ['missing-input-secret', 'invalid-input-secret', 'sitekey-secret-mismatch', 'invalid-or-already-seen-response-secret'];
@@ -59,6 +61,18 @@ abstract class SiteVerify implements BotVerifierInterface
         return false;
     }
 
+    /** Whether the answer names the action the widget was given (2.25.1). */
+    public function reportsAction(): bool
+    {
+        return false;
+    }
+
+    /** Every provider here names the site the token was issued on (2.25.1). */
+    public function reportsHostname(): bool
+    {
+        return true;
+    }
+
     /**
      * The script and the widget, for a template:
      * `<?= $this->captcha_widget('contact', $csp_nonce) ?>`.
@@ -73,7 +87,7 @@ abstract class SiteVerify implements BotVerifierInterface
     public function verify(string $token, ?string $clientIp = null, ?string $action = null): BotVerdict
     {
         if ($this->client === null) {
-            return BotVerdict::unavailable('no-http-client');
+            return BotVerdict::misconfigured('no-http-client');
         }
         $fields = ['secret' => $this->secret, 'response' => $token, ...$this->extraFields()];
         if ($clientIp !== null) {
@@ -99,7 +113,7 @@ abstract class SiteVerify implements BotVerifierInterface
 
         $codes = array_values(array_filter(is_array($answer['error-codes'] ?? null) ? $answer['error-codes'] : [], is_string(...)));
         if (array_intersect($codes, self::OWN_MISTAKES) !== []) {
-            return BotVerdict::unavailable(implode(',', array_intersect($codes, self::OWN_MISTAKES)));
+            return BotVerdict::misconfigured(implode('.', array_intersect($codes, self::OWN_MISTAKES)));
         }
         if (!$answer['success']) {
             return BotVerdict::bot($codes, self::score($answer));

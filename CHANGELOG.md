@@ -3,6 +3,23 @@
 All Zana packages share one version number and are released together. A release that did
 not change this package is not listed.
 
+## 2.25.1 — Unreleased
+
+### Fixed
+
+- `check` reported a Content-Security-Policy with sources scoped to a path, such as `https://www.google.com/recaptcha/`
+  as Google documents them, as blocking the widget. Paths are now read as CSP reads them: one ending in `/` covers what
+  lies under it, one without covers that path only.
+- reCAPTCHA's sources are Google's documented ones: scoped to `/recaptcha/`, with the frame host
+  `recaptcha.google.com` and `connect-src`, which 2.25.0 did not ask for.
+- No HTTP client, or a provider answering that the secret is missing or wrong, is a misconfiguration (mj-zana/security
+  2.25.1), so it is refused even with `security.bot.on_unavailable: allow`; an unset or unknown `captcha.provider` too.
+
+### Added
+
+- The providers say what they report: all their hostnames; Turnstile and reCAPTCHA v3 their actions.
+- The README shows the HTTP client bounded: a connect timeout, a read timeout, a total duration, no retries.
+
 ## 2.25.0 — 2026-11-14
 
 First release (FE-64). CAPTCHA providers behind mj-zana/security's `#[VerifyHuman]`:

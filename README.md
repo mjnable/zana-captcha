@@ -13,8 +13,13 @@ The providers are asked through a PSR-18 HTTP client, which the application
 installs and registers; no provider SDK is needed:
 
 ```php
-$services->singleton(\Psr\Http\Client\ClientInterface::class, static fn () => new \Symfony\Component\HttpClient\Psr18Client());
+$services->singleton(\Psr\Http\Client\ClientInterface::class, static fn () => new \Symfony\Component\HttpClient\Psr18Client(
+    \Symfony\Component\HttpClient\HttpClient::create(['max_connect_duration' => 2, 'timeout' => 3, 'max_duration' => 5]),
+));
 ```
+
+Bound it: a connect timeout (Symfony 8.1 or later), a read timeout and a total duration. Never wrap it in a
+retrying client: a retried token is a reused one, and providers refuse it.
 
 ## Configuration
 

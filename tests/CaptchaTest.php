@@ -258,7 +258,7 @@ final class CaptchaTest extends TestCase
     public function testReCaptchaV3NeedsTheNonceForItsInlineScript(): void
     {
         $config = ['captcha.provider' => 'recaptcha_v3', 'captcha.secret' => 's', 'captcha.site_key' => 'k', 'http.middleware' => [SecurityHeadersMiddleware::class]];
-        $hosts = ['script-src' => ["'self'", 'https://www.google.com', 'https://www.gstatic.com'], 'frame-src' => ['https://www.google.com']];
+        $hosts = ['script-src' => ["'self'", 'https://www.google.com', 'https://www.gstatic.com'], 'frame-src' => ['https://www.google.com', 'https://recaptcha.google.com'], 'connect-src' => ["'self'", 'https://www.google.com']];
 
         $noNonce = $this->check([...$config, 'http.security_headers' => ['csp' => $hosts]]);   // as on a site whose page cache rules out nonces
         $this->assertCount(1, $noNonce);
@@ -266,6 +266,74 @@ final class CaptchaTest extends TestCase
         $this->assertSame([], $this->check([...$config, 'http.security_headers' => ['csp' => [...$hosts, 'script-src' => [...$hosts['script-src'], '{nonce}']]]]));
         $this->assertSame([], $this->check([...$config, 'http.security_headers' => ['csp' => [...$hosts, 'script-src' => [...$hosts['script-src'], "'unsafe-inline'"]]]]));
         $this->assertSame([], $this->check(['captcha.provider' => 'turnstile', 'captcha.secret' => 's', 'captcha.site_key' => 'k', 'http.middleware' => [SecurityHeadersMiddleware::class], 'http.security_headers' => ['csp' => ['script-src' => ["'self'", 'https://challenges.cloudflare.com'], 'frame-src' => ['https://challenges.cloudflare.com']]]]), 'Turnstile needs no nonce');
+    }
+
+    public function testGooglesDocumentedPolicyIsAccepted(): void
+    {
+        // As Google's reCAPTCHA FAQ writes it, scoped to /recaptcha/ (a false alarm in 2.25.0).
+        $google = [
+            'script-src' => ["'self'", '{nonce}', 'https://www.google.com/recaptcha/', 'https://www.gstatic.com/recaptcha/'],
+            'frame-src' => ['https://www.google.com/recaptcha/', 'https://recaptcha.google.com/recaptcha/'],
+            'connect-src' => ["'self'", 'https://www.google.com/recaptcha/'],
+        ];
+        foreach (['recaptcha_v2', 'recaptcha_v3'] as $provider) {
+            $config = ['captcha.provider' => $provider, 'captcha.secret' => 's', 'captcha.site_key' => 'k', 'http.middleware' => [SecurityHeadersMiddleware::class]];
+            $this->assertSame([], $this->check([...$config, 'http.security_headers' => ['csp' => $google]]), $provider);
+
+            $missing = $this->check([...$config, 'http.security_headers' => ['csp' => [...$google, 'connect-src' => ["'self'"], 'frame-src' => ['https://www.google.com/recaptcha/']]]]);
+            $this->assertStringContainsString('frame-src https://recaptcha.google.com/recaptcha/; connect-src https://www.google.com/recaptcha/', $missing[0]->message, "{$provider}: the second frame host and connect-src, as Google lists them");
+        }
+    }
+
+    /**
+     * @return iterable<string, array{0: string, 1: string, 2: bool}>
+     */
+    public static function paths(): iterable
+    {
+        yield 'the origin covers every path' => ['recaptcha_v2', 'https://www.google.com', true];
+        yield 'the host alone too' => ['recaptcha_v2', 'www.google.com', true];
+        yield 'a path with a slash covers what is under it' => ['recaptcha_v2', 'https://www.google.com/recaptcha/', true];
+        yield 'a path without one is that path only' => ['recaptcha_v2', 'https://www.google.com/recaptcha', false];
+        yield 'another path' => ['recaptcha_v2', 'https://www.google.com/maps/', false];
+        yield 'http is not https' => ['recaptcha_v2', 'http://www.google.com/recaptcha/', false];
+        yield "Turnstile's frames are not under its script's path" => ['turnstile', 'https://challenges.cloudflare.com/turnstile/', false];
+        yield 'Turnstile, the origin' => ['turnstile', 'https://challenges.cloudflare.com/', true];
+    }
+
+    #[DataProvider('paths')]
+    public function testPathsAreReadAsCspReadsThem(string $provider, string $source, bool $allowed): void
+    {
+        $verifier = Providers::create($provider, 's', 'k', null, new Psr17Factory(), new Psr17Factory());
+        $frames = $verifier->cspSources()['frame-src'];
+        $policy = ['frame-src' => $provider === 'turnstile' ? [$source] : [$source, 'https://recaptcha.google.com/recaptcha/']];
+
+        $refused = \Zana\Captcha\ContentSecurityPolicy::refused($policy, ['frame-src' => $frames]);
+
+        $this->assertSame($allowed, $refused === [], (string) json_encode($refused));
+    }
+
+    public function testTheApplicationsMistakesAreMisconfigurationsNotOutages(): void
+    {
+        foreach (['{"success": false, "error-codes": ["invalid-input-secret"]}', '{"success": false, "error-codes": ["missing-input-secret"]}'] as $answer) {
+            $this->assertTrue(self::provider('turnstile', new FakeClient([$answer]))->verify('t')->misconfigured, $answer);
+        }
+        $this->assertTrue(self::provider('turnstile', null)->verify('t')->misconfigured, 'no HTTP client');
+        $this->assertTrue($this->app([])->container()->get(BotVerifierInterface::class)->verify('t')->misconfigured, 'no provider set');
+        foreach ([new Response(503), '<html>busy</html>', new \RuntimeException('Connection timed out')] as $answer) {
+            $verdict = self::provider('turnstile', new FakeClient([$answer]))->verify('t');
+            $this->assertSame([true, false], [$verdict->unavailable, $verdict->misconfigured], 'the provider, not the application');
+        }
+    }
+
+    public function testEachProviderSaysWhatItReports(): void
+    {
+        $claims = [];
+        foreach (array_keys(Providers::ALL) as $name) {
+            $verifier = self::provider($name, null);
+            $claims[$name] = [$verifier->reportsAction(), $verifier->reportsHostname()];
+        }
+
+        $this->assertSame(['turnstile' => [true, true], 'recaptcha_v2' => [false, true], 'recaptcha_v3' => [true, true], 'hcaptcha' => [false, true]], $claims);
     }
 
     public function testHCaptchasWildcardHosts(): void

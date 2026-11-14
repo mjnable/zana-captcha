@@ -12,6 +12,11 @@ namespace Zana\Captcha\Provider;
  */
 final class ReCaptchaV3 extends ReCaptchaV2
 {
+    public function reportsAction(): bool
+    {
+        return true;
+    }
+
     public function scores(): bool
     {
         return true;

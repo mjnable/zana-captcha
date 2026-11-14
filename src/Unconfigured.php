@@ -32,6 +32,6 @@ final readonly class Unconfigured implements BotVerifierInterface
 
     public function verify(string $token, ?string $clientIp = null, ?string $action = null): BotVerdict
     {
-        return BotVerdict::unavailable($this->why);
+        return BotVerdict::misconfigured($this->why);
     }
 }

@@ -10,6 +10,11 @@ namespace Zana\Captcha\Provider;
  */
 final class Turnstile extends SiteVerify
 {
+    public function reportsAction(): bool
+    {
+        return true;
+    }
+
     public function field(): string
     {
         return 'cf-turnstile-response';

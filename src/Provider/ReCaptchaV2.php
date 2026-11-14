@@ -26,7 +26,12 @@ class ReCaptchaV2 extends SiteVerify
 
     public function cspSources(): array
     {
-        return ['script-src' => ['https://www.google.com', 'https://www.gstatic.com'], 'frame-src' => ['https://www.google.com']];
+        // As Google's reCAPTCHA FAQ lists them (2.25.1): scoped to /recaptcha/, with the second frame host and connect-src.
+        return [
+            'script-src' => ['https://www.google.com/recaptcha/', 'https://www.gstatic.com/recaptcha/'],
+            'frame-src' => ['https://www.google.com/recaptcha/', 'https://recaptcha.google.com/recaptcha/'],
+            'connect-src' => ['https://www.google.com/recaptcha/'],
+        ];
     }
 
     protected function element(?string $action, ?string $nonce): string

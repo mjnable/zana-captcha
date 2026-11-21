@@ -3,6 +3,24 @@
 All Zana packages share one version number and are released together. A release that did
 not change this package is not listed.
 
+## 2.29.1 — Unreleased
+
+### Security
+
+- A wrong or missing Turnstile secret was let through wherever `security.bot.on_unavailable` is `"allow"`. Cloudflare
+  answers it with HTTP 400 and the error in the body, and every status but 200 was taken for the provider being out of
+  reach. The answer's errors are now read whatever the status: the application's own mistake is a misconfiguration,
+  always refused and logged as an error, as 2.25.1 meant. A status other than 200 that names no such mistake is still
+  an outage, and never a person, even when its body says `"success": true`.
+
+### Added
+
+- `LiveProvidersTest`: Turnstile, reCAPTCHA and hCaptcha's real siteverify endpoints, with their published test keys,
+  through the bounded HTTP client the README documents. Opt-in (`ZANA_TEST_CAPTCHA_LIVE=1`); the daily CI run sets it.
+  It records what each provider answers, so a change on their side shows: Google answers a wrong secret as a wrong
+  token, so a wrong reCAPTCHA secret is refused as a bot, and cannot be logged as the application's mistake.
+- `symfony/http-client` for development, for that test.
+
 ## 2.25.1 — 2026-11-15
 
 ### Fixed

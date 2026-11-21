@@ -21,7 +21,10 @@ use Zana\Security\Bot\BotVerifierInterface;
  * The answer is unavailable, not a bot, when the provider cannot be asked
  * or its answer cannot be read; misconfigured, always refused, when no HTTP
  * client is registered or the provider says the secret is missing or wrong
- * (2.25.1): that is the application's mistake, not the visitor's.
+ * (2.25.1): that is the application's mistake, not the visitor's. Since 2.30
+ * the error is read whatever the HTTP status: Cloudflare sends it with a 400.
+ * Google answers a wrong secret as a wrong token, so with reCAPTCHA it is
+ * refused as a bot, and cannot be told apart.
  */
 abstract class SiteVerify implements BotVerifierInterface, BotClaimsInterface
 {
@@ -103,17 +106,18 @@ abstract class SiteVerify implements BotVerifierInterface, BotClaimsInterface
         } catch (\Throwable $e) {
             return BotVerdict::unavailable('http-client-error');
         }
+        $answer = json_decode((string) $response->getBody(), true, 8);
+        $codes = is_array($answer) ? array_values(array_filter(is_array($answer['error-codes'] ?? null) ? $answer['error-codes'] : [], is_string(...))) : [];
+        // Read before the status (2.30): Cloudflare answers a wrong or missing secret with HTTP 400, and the error in
+        // the body. Taken for an outage, a wrong secret was let through wherever on_unavailable is "allow".
+        if (array_intersect($codes, self::OWN_MISTAKES) !== []) {
+            return BotVerdict::misconfigured(implode('.', array_intersect($codes, self::OWN_MISTAKES)));
+        }
         if ($response->getStatusCode() !== 200) {
             return BotVerdict::unavailable('http-' . $response->getStatusCode());
         }
-        $answer = json_decode((string) $response->getBody(), true, 8);
         if (!is_array($answer) || !is_bool($answer['success'] ?? null)) {
             return BotVerdict::unavailable('unreadable-answer');
-        }
-
-        $codes = array_values(array_filter(is_array($answer['error-codes'] ?? null) ? $answer['error-codes'] : [], is_string(...)));
-        if (array_intersect($codes, self::OWN_MISTAKES) !== []) {
-            return BotVerdict::misconfigured(implode('.', array_intersect($codes, self::OWN_MISTAKES)));
         }
         if (!$answer['success']) {
             return BotVerdict::bot($codes, self::score($answer));

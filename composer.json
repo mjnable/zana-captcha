@@ -24,7 +24,8 @@
         "mj-zana/routing": "^2.21",
         "mj-zana/view": "^2.0",
         "phpstan/phpstan": "^2.1",
-        "phpunit/phpunit": "^11.5"
+        "phpunit/phpunit": "^11.5",
+        "symfony/http-client": "^8.1"
     },
     "suggest": {
         "mj-zana/view": "For the captcha_widget() helper",

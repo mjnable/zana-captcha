@@ -325,6 +325,32 @@ final class CaptchaTest extends TestCase
         }
     }
 
+    /**
+     * 2.30, found by the live test: Cloudflare answers a wrong or missing secret with HTTP 400, the error in the body.
+     * Before, any status but 200 was an outage, which on_unavailable "allow" lets through.
+     */
+    public function testTheApplicationsMistakeIsReadWhateverTheStatus(): void
+    {
+        $json = ['Content-Type' => 'application/json'];
+        foreach ([
+            'as Cloudflare sends a wrong secret' => [new Response(400, $json, '{"error-codes":["invalid-input-secret"],"success":false,"messages":[]}'), 'invalid-input-secret'],
+            'as it sends none' => [new Response(400, $json, '{"error-codes":["missing-input-secret"],"success":false,"messages":[]}'), 'missing-input-secret'],
+            'with any status' => [new Response(500, $json, '{"error-codes":["invalid-input-secret"]}'), 'invalid-input-secret'],
+        ] as $case => [$answer, $why]) {
+            $verdict = self::provider('turnstile', new FakeClient([$answer]))->verify('t');
+            $this->assertSame([false, true, [$why]], [$verdict->human, $verdict->misconfigured, $verdict->errors], $case);
+        }
+
+        foreach ([
+            'a 400 that names no mistake of ours' => [new Response(400, $json, '{"error-codes":["bad-request"],"success":false}'), 'http-400'],
+            'a 400 that is not JSON' => [new Response(400, [], '<html>Bad Request</html>'), 'http-400'],
+            'a 503 that says success' => [new Response(503, $json, '{"success":true}'), 'http-503'],
+        ] as $case => [$answer, $why]) {
+            $verdict = self::provider('turnstile', new FakeClient([$answer]))->verify('t');
+            $this->assertSame([false, true, false, [$why]], [$verdict->human, $verdict->unavailable, $verdict->misconfigured, $verdict->errors], "{$case}: an outage, never a human");
+        }
+    }
+
     public function testEachProviderSaysWhatItReports(): void
     {
         $claims = [];

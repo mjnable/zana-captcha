@@ -44,6 +44,8 @@ jobs:
         working-directory: zana-captcha
       - name: PHPUnit
         working-directory: zana-captcha
+        env:
+          ZANA_TEST_CAPTCHA_LIVE: ${{ github.event_name == 'schedule' && '1' || '' }}
         run: |
           set -o pipefail
           vendor/bin/phpunit --display-skipped --display-incomplete | tee phpunit.out
